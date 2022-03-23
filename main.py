@@ -43,7 +43,7 @@ class myplugin(StellarPlayer.IStellarPlayerPlugin):
     def makeBreadcrumb(self):
         return [{
             'type':'link',
-            'name': f'{i}_{item[0]}',
+            'name': f'{i}_{item[0][:25]}', # limit name length
             'textColor': '#000000', 
             'fontSize': 13,
             'width': 100,
