@@ -63,12 +63,12 @@ class myplugin(StellarPlayer.IStellarPlayerPlugin):
                 }
             ]
         ]
-        self.files = [{
+        self.files = sorted([{
             "name": f'[{i["name"]}]' if i["type"] == "folder"  else i["name"],
             "type": i["type"],
             "url": i["url"],
             "file_id": i["file_id"]
-        } for i in self.client.get_file_list(self.breadcrumb[-1][1])]
+        } for i in self.client.get_file_list(self.breadcrumb[-1][1])], key=lambda x: x['name'])
         header = {
             'group': [
                 {'type':'label', 'height': 40, 'width': 80, 'name':'阿里云盘'},
