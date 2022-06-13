@@ -67,7 +67,8 @@ class myplugin(StellarPlayer.IStellarPlayerPlugin):
             "name": f'[{i["name"]}]' if i["type"] == "folder"  else i["name"],
             "type": i["type"],
             "url": i["url"],
-            "file_id": i["file_id"]
+            "file_id": i["file_id"],
+            "drive_id": i["drive_id"]
         } for i in self.client.get_file_list(self.breadcrumb[-1][1])], key=lambda x: x['name'])
         header = {
             'group': [
@@ -75,7 +76,7 @@ class myplugin(StellarPlayer.IStellarPlayerPlugin):
                 {'type':'space', 'width': -1},
                 {
                     'type':'link',
-                    'name':'logout',
+                    'name':'退出登录',
                     'textColor': '#000000', 
                     'fontSize': 15,
                     'width': 80,
@@ -85,7 +86,7 @@ class myplugin(StellarPlayer.IStellarPlayerPlugin):
             'height': 40
         }
         controls = [
-            header,          
+            header,
             {
                 'group': self.makeBreadcrumb(),
                 'height': 30
@@ -132,11 +133,16 @@ class myplugin(StellarPlayer.IStellarPlayerPlugin):
         elif file["type"] == "file":
             print(file["name"])
             print(file["url"])
+            url = file["url"]
+            try:
+                url = self.client.get_video_preview_info(file["file_id"], file["drive_id"])
+            except:
+                raise
             headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36', 'referer': 'https://www.aliyundrive.com/'}
             try:
-                self.player.play(file["url"], caption=file["name"], headers=headers)
+                self.player.play(url, caption=file["name"], headers=headers)
             except:
-                self.player.play(file["url"], headers=headers)
+                self.player.play(url, headers=headers)
     
 def newPlugin(player:StellarPlayer.IStellarPlayer,*arg):
     plugin = myplugin(player)

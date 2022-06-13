@@ -235,9 +235,29 @@ class Client:
                     name=item["name"],
                     type=item["type"],
                     file_id=item["file_id"],
+                    drive_id=item["drive_id"],
                     url = url
                 )
         return None
+
+    def get_video_preview_info(self, file_id='root', drive_id=None):
+        print(f'get_video_preview_info: {file_id}')
+        body = dict(
+            file_id=file_id,
+            drive_id=drive_id,
+            template_id='',
+            url_expire_sec=3600,
+            get_subtitle_info=False,
+            category='live_transcoding'
+        )
+        response = self.post(V2_FILE_GET_VIDEO_PREVIEW_PLAY_INFO, body=body)
+        if response.status_code == 200:
+            try:
+                return response.json()["video_preview_play_info"]["live_transcoding_task_list"][-1]["url"]
+            except:
+                pass
+        return None
+                
 
 def tokenChanged(msg=None):
     print(f'tokenChanged: {msg}')
