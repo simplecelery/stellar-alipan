@@ -13,6 +13,7 @@ class myplugin(StellarPlayer.IStellarPlayerPlugin):
         self.client = Client(self.tokenChanged) 
         self.breadcrumb = [('root', 'root')]
         self.files = []
+        self.raw = 0
         
     def stop(self):
         return super().stop()
@@ -75,6 +76,26 @@ class myplugin(StellarPlayer.IStellarPlayerPlugin):
                 {'type':'label', 'height': 40, 'width': 80, 'name':'阿里云盘'},
                 {'type':'space', 'width': -1},
                 {
+                    'group' : [
+                        {
+                            'type':'radio',
+                            'name':'原文件(支持杜比)',
+                            'height': 40, 
+                            'textColor': '#444444', 
+                            'fontSize': 14,
+                            ':value': 'raw'
+                        },
+                        {
+                            'type':'radio',
+                            'name':'1080P(流畅)',
+                            'height': 40, 
+                            'textColor': '#444444', 
+                            'fontSize': 14,
+                            'value': 1
+                        }
+                    ]   
+                },
+                {
                     'type':'link',
                     'name':'退出登录',
                     'textColor': '#000000', 
@@ -97,7 +118,7 @@ class myplugin(StellarPlayer.IStellarPlayerPlugin):
                 'itemheight': 30, 
                 'itemlayout': itemlayout,
                 'value': self.files,
-                '@dblclick': 'onFileClicked'
+                '@dblclick': 'onFileDblClicked'
             },
         ]
         print(controls)
@@ -125,7 +146,7 @@ class myplugin(StellarPlayer.IStellarPlayerPlugin):
         self.breadcrumb = self.breadcrumb[:index]
         self.updateLayout()
 
-    def onFileClicked(self, page, control, item):
+    def onFileDblClicked(self, page, control, item):
         file = self.files[item]
         if file["type"] == "folder":
             self.breadcrumb.append((file["name"].strip("[]"), file["file_id"]))
@@ -134,10 +155,14 @@ class myplugin(StellarPlayer.IStellarPlayerPlugin):
             print(file["name"])
             print(file["url"])
             url = file["url"]
-            try:
+            if not self.raw:
+                print("get preview url")
                 url = self.client.get_video_preview_info(file["file_id"], file["drive_id"])
-            except:
-                raise
+            line = url
+            while line:
+                print(line[:512])
+                line = line[512:]
+
             headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36', 'referer': 'https://www.aliyundrive.com/'}
             try:
                 self.player.play(url, caption=file["name"], headers=headers)

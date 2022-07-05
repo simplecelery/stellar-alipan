@@ -1,4 +1,7 @@
 """..."""
+
+UNI_PARAMS = {'appName': 'aliyun_drive'}
+
 # 主机
 API_HOST = 'https://api.aliyundrive.com'
 AUTH_HOST = 'https://auth.aliyundrive.com'
@@ -78,3 +81,6 @@ UNI_HEADERS = {
     # 'User-Agent': 'AliApp(yunpan/2.3.0) com.alicloud.databox/15287370 Channel/263200@rimet_android_2.3.0 language/zh-CN /Android Mobile/OnePlus GM1900',
     # 'Referer': 'https://aliyundrive.com'
 }
+
+
+V2_ACCOUNT_TOKEN = '/v2/account/token'

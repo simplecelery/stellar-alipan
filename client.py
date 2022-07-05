@@ -38,7 +38,7 @@ class Client:
 
     def login(self):
         response = self.session.get(
-            PASSPORT_HOST + NEWLOGIN_QRCODE_GENERATE_DO
+            PASSPORT_HOST + NEWLOGIN_QRCODE_GENERATE_DO, params=UNI_PARAMS
         )
         data = response.json()['content']['data']
         print('等待扫描二维码 ...')
@@ -62,7 +62,7 @@ class Client:
         while True:
             response = self.session.post(
                 PASSPORT_HOST + NEWLOGIN_QRCODE_QUERY_DO,
-                data=data
+                data=data, params=UNI_PARAMS
             )
             login_data = response.json()['content']['data']
             qrCodeStatus = login_data['qrCodeStatus']
@@ -81,43 +81,17 @@ class Client:
             time.sleep(2)
 
     def onLoginResponse(self, response):
+        print(response)
         if response.status_code != 200:
             return self.tokenChanged('登录失败 ~')
         
         bizExt = response.json()['content']['data']['bizExt']
         bizExt = base64.b64decode(bizExt).decode('gb18030')
-        accessToken = json.loads(bizExt)['pds_login_result']['accessToken']
 
-        # 使用accessToken持久化身份认证
-        response = self.session.post(
-            AUTH_HOST + V2_OAUTH_TOKEN_LOGIN,
-            json={
-                'token': accessToken
-            }
-        )
+       # 获取解析出来的 refreshToken, 使用这个token获取下载链接是直链, 不需要带 referer header
+        refresh_token = json.loads(bizExt)['pds_login_result']['refreshToken']
 
-        goto = response.json()['goto']
-        code: str = parse.parse_qs(parse.urlparse(goto).query)['code'][0]  # type: ignore
-
-        response = self.session.post(
-            WEBSV_HOST + TOKEN_GET,
-            json={
-                'code': code
-            }
-        )
-
-        if response.status_code != 200:
-            return self.tokenChanged('登陆失败 ~')
-
-        self.token = response.json()
-
-        #
-        print(f'username: {self.token["user_name"]} nickname: {self.token["nick_name"]} user_id: {self.token["user_id"]}')
-
-        # 保存
-        self._save()
-
-        self.tokenChanged()
+        self._refesh_token(refresh_token)        
 
     def _save(self):
         if self.token:
@@ -131,8 +105,11 @@ class Client:
             refresh_token = self.token["refresh_token"]
         print('刷新 token ...')
         response = self.session.post(
-            API_HOST + TOKEN_REFRESH,
-            json={'refresh_token': refresh_token}
+            API_HOST + V2_ACCOUNT_TOKEN,
+            json={
+                'refresh_token': refresh_token,
+                'grant_type': 'refresh_token'
+            }
         )
         if response.status_code == 200:
             self.token = response.json()
@@ -143,7 +120,7 @@ class Client:
 
         print(f'刷新 token {self.token["access_token"]}')
         self.session.headers.update({
-            'Authorization': f'Bearer {self.token["access_token"]}'
+            'Authorization': f'{self.token["access_token"]}'
         })
 
         self.tokenChanged()
