@@ -40,7 +40,6 @@ class Client:
             f.close()
             self._init_x_headers()
         except:
-            raise
             self.token = None
 
 
