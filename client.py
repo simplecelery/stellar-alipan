@@ -4,6 +4,7 @@ import time
 import threading
 import base64
 import json
+import uuid
 
 from urllib import parse
 from config import *
@@ -12,7 +13,7 @@ from config import *
 class Client:
     def __init__(self, tokenChanged):
         self.session = requests.session()
-        self.session.params.update(UNI_PARAMS)  # type:ignore
+        self.session.trust_env = False
         self.session.headers.update(UNI_HEADERS)
 
         self.session.get(AUTH_HOST + V2_OAUTH_AUTHORIZE, params={
@@ -27,14 +28,40 @@ class Client:
         SESSIONID = self.session.cookies.get('SESSIONID')
         print(f'SESSIONID {SESSIONID}')
 
+        self._x_device_id = None
+        self.tokenChanged = tokenChanged
+        self._SLEEP_TIME_SEC = None
+        self._X_SIGNATURE = ('f4b7bed5d8524a04051bd2da876dd79afe922b8205226d65855d02b267422adb1'
+                             'e0d8a816b021eaf5c36d101892180f79df655c5712b348c2a540ca136e6b22001')
+
         try:
             f = open("token.json", "r")
-            self.token = json.loads(f.read())
+            self.token = json.loads(f.read())            
             f.close()
+            self._init_x_headers()
         except:
+            raise
             self.token = None
 
-        self.tokenChanged = tokenChanged
+
+
+    def _init_x_headers(self):
+        if self._x_device_id is None:
+            # 如果 self._x_device_id 为 None，尝试从 token 中获取（来自文件）
+            self._x_device_id = self.token.get('x_device_id')
+        if self._x_device_id is None:
+            # 如果文件中未存储，则说明还没有，则生成
+            self._x_device_id = uuid.uuid4().hex
+        # 设置 x-headers
+        self.session.headers.update({
+            'x-device-id': self._x_device_id,
+            'x-signature': self._X_SIGNATURE
+        })
+        # 将 x-headers 放到 token 对象中，用以保存
+        if not self.token.get('x_device_id'):
+            print('初始化 x_device_id')
+            self.token['x_device_id'] = self._x_device_id
+            self._save()
 
     def login(self):
         response = self.session.get(
@@ -81,7 +108,7 @@ class Client:
             time.sleep(2)
 
     def onLoginResponse(self, response):
-        print(response)
+        # print(response)
         if response.status_code != 200:
             return self.tokenChanged('登录失败 ~')
         
@@ -113,6 +140,8 @@ class Client:
         )
         if response.status_code == 200:
             self.token = response.json()
+            if not self._x_device_id:
+                self._init_x_headers()
             self._save()
         else:
             print('刷新 token 失败 ~')
@@ -124,15 +153,11 @@ class Client:
         })
 
         self.tokenChanged()
-        # error_log_exit(response)
 
     def request(self, method: str, url: str,
                 params, headers, data,
                 files, verify, body) :
-        """统一请求方法"""        
-        if 'drive_id' in body and body['drive_id'] is None:
-            body['drive_id'] = self.token['default_drive_id']
-
+        """统一请求方法"""
         # 删除值为None的键
         if body is not None:
             body = {k: v for k, v in body.items() if v is not None}
@@ -140,33 +165,80 @@ class Client:
         if data is not None and isinstance(data, dict):
             data = {k: v for k, v in data.items() if v is not None}
 
-        for i in range(3):
-            print(
-                f'{method} {url} {params} {data} {headers} {files} {verify} {body}'
-            )
-            response = self.session.request(method=method, url=url, params=params,
-                                            data=data, headers=headers, files=files,
-                                            verify=verify, json=body)
-            status_code = response.status_code
-            print(
-                f'{i} {response.request.method} {response.url} {status_code} {response.headers.get("Content-Length", 0)}'
-            )
-            if status_code == 401 or (
-                    # aims search 手机端apis
-                    status_code == 400 and response.text.startswith('AccessToken is invalid')
-            ):
-                self._refesh_token()
+        response = None
+        for i in range(1, 6):
+            try:
+                print(f'{url=} {params=} {data=} {headers=} {body=}')
+                response = self.session.request(
+                    method=method, url=url, params=params, data=data,
+                    headers=headers, verify=True, json=body, timeout=10.0
+                )
+            except requests.exceptions.ConnectionError as e:
+                print(e)
+                time.sleep(self._request_failed_delay)
                 continue
 
-            if status_code == 429 or status_code == 500:
-                print('被限流了, 休息一下 ...')
-                time.sleep(5)
+            status_code = response.status_code
+            print(response)
+
+            if status_code == 401:
+                if b'"ShareLinkTokenInvalid"' in response.content:
+                    # 刷新 share_token
+                    share_id = body['share_id']
+                    share_pwd = body['share_pwd']
+                    r = self.post(
+                        V2_SHARE_LINK_GET_SHARE_TOKEN,
+                        body={'share_id': share_id, 'share_pwd': share_pwd}
+                    )
+                    share_token = r.json()['share_token']
+                    headers['x-share-token'].share_token = share_token
+                elif b'"UserDeviceOffline"' in response.content:
+                    self._create_session()
+                else:
+                    self._refesh_token()
                 continue
+
+            if status_code in [429, 502, 504]:
+                if self._SLEEP_TIME_SEC is None:
+                    sleep_int = 5 ** (i % 4)
+                else:
+                    sleep_int = self._SLEEP_TIME_SEC
+                err_msg = None
+                if status_code == 429:
+                    err_msg = '请求太频繁'
+                elif status_code == 502:
+                    err_msg = '内部网关错误'
+                elif status_code == 504:
+                    err_msg = '内部网关超时'
+                print(f'{err_msg}，暂停 {sleep_int} 秒钟')
+                time.sleep(sleep_int)
+                continue
+
+            if status_code == 500:
+                raise Exception(response.content)
+
+            if status_code == 400:
+                if b'"DeviceSessionSignatureInvalid"' in response.content \
+                        or b'"not found device info"' in response.content:
+                    self._create_session()
+                    continue
+                elif b'"InvalidResource.FileTypeFolder"' in response.content:
+                    print(
+                        '请区分 文件 和 文件夹，有些操作是它们独有的，比如获取下载链接，很显然 文件夹 是没有的！')
+
+            if status_code == 403:
+                if b'"SharelinkCreateExceedDailyLimit"' in response.content:
+                    raise Exception(response.content)
 
             return response
 
-        print(f'重试3次仍旧失败~')
-        return response
+        print(f'重试 5 次仍失败，抛出异常')
+        raise Exception(response.content)
+
+    def _create_session(self):
+        self.post(USERS_V1_USERS_DEVICE_CREATE_SESSION,
+                  body={'deviceName': f'my cp', 'modelName': 'Windows 操作系统', 'pubKey':  ('04d9d2319e0480c840efeeb75751b86d0db0c5b9e72c6260a1d846958adceaf9d'
+                     'ee789cab7472741d23aafc1a9c591f72e7ee77578656e6c8588098dea1488ac2a'), })
 
     def get(self, path, host = API_HOST, params = None, headers = None,
             verify = None) :
@@ -175,6 +247,10 @@ class Client:
 
     def post(self, path, host = API_HOST, params = None, headers = None, data = None,
              files=None, verify = None, body = None):
+        if 'drive_id' in body and body['drive_id'] is None:
+            # 如果存在 attr drive_id 并且它是 None，并将 default_drive_id 设置为它
+            body['drive_id'] = self.token.get('default_drive_id')
+        print(f'{host + path=} {params=} {data=} {headers=} {body=}')
         return self.request(method='POST', url=host + path, params=params, data=data,
                             headers=headers, files=files, verify=verify, body=body)
 
@@ -201,11 +277,14 @@ class Client:
         response = self.post(ADRIVE_V3_FILE_LIST, body=body)
         if response.status_code == 200:
             for item in response.json()["items"]:
-                print(item)
+                # print(item)
+                for k, v in item.items():
+                    print(k + "=" + str(v))
                 if item["type"] == "folder":
                     url = ""
                 elif item["category"] == "video":
-                    url = item["download_url"] 
+                    # url = item["download_url"] 
+                    url = item["url"] 
                 else:
                     continue
                 yield dict(
@@ -217,14 +296,13 @@ class Client:
                 )
         return None
 
-    def get_video_preview_info(self, file_id='root', drive_id=None):
+    def get_video_preview_play_info(self, file_id='root', drive_id=None):
         print(f'get_video_preview_info: {file_id}')
         body = dict(
             file_id=file_id,
             drive_id=drive_id,
             template_id='',
-            url_expire_sec=3600,
-            get_subtitle_info=False,
+            url_expire_sec=14400,
             category='live_transcoding'
         )
         response = self.post(V2_FILE_GET_VIDEO_PREVIEW_PLAY_INFO, body=body)
@@ -248,12 +326,15 @@ def main():
         if c.token is not None:
             break
         time.sleep(1.0)
-    files = c.get_file_list()
-    for file in files:
-        if file["type"] == 'folder':
-            print(f'[{file["name"]}]')
-        elif file["type"] == 'file':
-            print(f'{file["name"]} - {file["url"]}')
+    # files = c.get_file_list()
+    # for file in files:
+    #     if file["type"] == 'folder':
+    #         # print(f'[{file["name"]}]')
+    #         pass
+    #     elif file["type"] == 'file':
+    #         print(f'{file["name"]} - {file["url"]} ---- {file=}')
+    ret = c.get_video_preview_play_info('64e5b5aa624c5ccd6e6d4b6cbb756f94bf816a24')
+    print(ret)
                 
 
 if __name__ == "__main__":

@@ -157,7 +157,7 @@ class myplugin(StellarPlayer.IStellarPlayerPlugin):
             url = file["url"]
             if not self.raw:
                 print("get preview url")
-                url = self.client.get_video_preview_info(file["file_id"], file["drive_id"])
+                url = self.client.get_video_preview_play_info(file["file_id"], file["drive_id"])
             line = url
             while line:
                 print(line[:512])
